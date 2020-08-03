@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using TdLib;
 using UniRx;
 using UnityEngine;
@@ -86,8 +87,12 @@ namespace Telegram
             bool reachEnd = false;
             while (!reachEnd)
             {
-                var data = await telegram.Client.GetChatHistoryAsync(chat.Id, last, -batchSize, batchSize);
+                var task = telegram.Client.GetChatHistoryAsync(chat.Id, last, -batchSize, batchSize);
+                    
+                if (await Task.WhenAny(task, Task.Delay(5000)) == task)
                 {
+                    var data = task.Result;
+                    
                     List<ChatMessage> list = new List<ChatMessage>();
                     List<Friend> friends = new List<Friend>();
             
@@ -127,16 +132,42 @@ namespace Telegram
             
                     chatHistory.InsertRange(0, list);
                     database.AddFriends(friends);
-                }
-
-                if (data.TotalCount < 2)
-                {
-                    reachEnd = true;
+                    
+                    if (data.TotalCount < 2)
+                    {
+                        reachEnd = true;
+                    }
+                    else
+                    {
+                        last = data.Messages_[0].Id;
+                        lastLoadedMessageId = last;
+                    }
                 }
                 else
                 {
-                    last = data.Messages_[0].Id;
-                    lastLoadedMessageId = last;
+                    var message = await telegram.Client.GetMessageAsync(chat.Id, last);
+                    
+                    if (message.Content is TdApi.MessageContent.MessageText mt)
+                    {
+                        UnityEngine.Debug.Log($"{mt.Text.Text}");
+                    }
+                    
+                    int nextDate = message.Date + 60 * 60;
+                    long next = last;
+
+                    while (next == last)
+                    {
+                        var nextMessage = await telegram.Client.GetChatMessageByDateAsync(chat.Id, nextDate);
+                        nextDate += 60 * 60;
+                        next = nextMessage.Id;
+                        
+                        if (nextMessage.Content is TdApi.MessageContent.MessageText mt2)
+                        {
+                            UnityEngine.Debug.Log($"{mt2.Text.Text}");
+                        }
+                    }
+
+                    last = next;
                 }
             }
             Debug.Log($"reachEnd");
